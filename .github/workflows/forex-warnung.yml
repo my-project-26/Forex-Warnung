@@ -1,7 +1,9 @@
 name: Forex-Warnung
 on:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    # UTC-Zeiten decken Sommer- und Winterzeit ab; bot.py filtert auf Berlin.
+    - cron: '30 14-16 * * *'
+    - cron: '0 15-17 * * *'
   workflow_dispatch:
 permissions:
   contents: write
