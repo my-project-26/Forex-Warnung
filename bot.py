@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Einmalige Prüfung neuer Forex-Factory-Ereignisse (Low/Medium/High)."""
+"""Forex Factory: Vorabendübersicht für alle Ereignisse des Folgetags."""
 import hashlib
 import json
 import logging
@@ -7,105 +7,120 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / "seen_events.json"
-FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+BASE = "https://nfs.faireconomy.media/"
 BERLIN = ZoneInfo("Europe/Berlin")
+IMPACT = {"low": "🟡", "medium": "🟠", "high": "🔴"}
+MAX_MESSAGE = 3500
 
 def get_json(url, data=None):
     payload = urlencode(data).encode() if data is not None else None
-    req = Request(url, data=payload, headers={"User-Agent": "ForexFactoryTelegramAlert/1.0", "Accept": "application/json"})
+    req = Request(url, data=payload, headers={"User-Agent": "ForexWarningBot/1.1", "Accept": "application/json"})
     with urlopen(req, timeout=30) as response:
         return json.load(response)
-
-def fetch_events():
-    events = get_json(FEED_URL)
-    if not isinstance(events, list) or not events:
-        raise ValueError("Kalenderantwort ist leer oder kein JSON-Array.")
-    for event in events:
-        if not isinstance(event, dict) or not all(k in event for k in ("date", "country", "title", "impact")):
-            raise ValueError("Unerwartetes Kalenderformat.")
-    return events
 
 def parse_date(value):
     dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if dt.tzinfo is None:
-        raise ValueError("Datum ohne Zeitzone")
-    return dt
+        raise ValueError("Kalenderdatum ohne Zeitzone")
+    return dt.astimezone(BERLIN)
 
-def week_id(events):
-    earliest = min(parse_date(x["date"]).astimezone(BERLIN).date() for x in events)
-    return (earliest - timedelta(days=(earliest.weekday() + 1) % 7)).isoformat()
+def load_calendar(tomorrow, today):
+    # Am Sonntag liegen Montags-Termine in der nächsten Kalenderwoche.
+    feed = "ff_calendar_nextweek.json" if today.weekday() == 6 else "ff_calendar_thisweek.json"
+    events = get_json(BASE + feed)
+    if not isinstance(events, list) or not events:
+        raise ValueError("Kalenderdaten fehlen oder haben ein ungültiges Format")
+    result = []
+    for e in events:
+        if not isinstance(e, dict) or not all(k in e for k in ("title", "date", "country", "impact")):
+            raise ValueError("Unerwartetes Datenformat von Forex Factory")
+        dt = parse_date(e["date"])
+        impact = str(e["impact"]).strip().lower()
+        if dt.date() == tomorrow and impact in IMPACT:
+            result.append((dt, impact, e))
+    return sorted(result, key=lambda x: (x[0], x[2]["country"], x[2]["title"]))
 
-def key_for(event):
-    text = "\x1f".join(str(event[k]).strip() for k in ("date", "country", "title"))
-    return hashlib.sha256(text.encode()).hexdigest()
-
-def send_alert(token, chat_id, event):
-    date = parse_date(event["date"]).astimezone(BERLIN).strftime("%d.%m.%Y, %H:%M Uhr (Berlin)")
-    impact = str(event["impact"]).strip().casefold()
-    icon, label = {"low": ("🟡", "LOW"), "medium": ("🟠", "MEDIUM"), "high": ("🔴", "HIGH")}[impact]
-    message = (
-        f"{icon} NEUES {label}-IMPACT-EREIGNIS\n\n"
-        f"Währung: {event['country']}\n"
-        f"Ereignis: {event['title']}\n"
-        f"Termin: {date}\n\n"
-        "Neu im Forex-Factory-Wochenkalender erkannt.\n"
-        "https://www.forexfactory.com/calendar"
-    )
-    answer = get_json(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        {"chat_id": chat_id, "text": message, "disable_web_page_preview": "true"},
-    )
-    if answer.get("ok") is not True:
-        raise RuntimeError("Telegram hat die Nachricht nicht akzeptiert.")
+def send_message(token, chat_id, msg):
+    result = get_json(f"https://api.telegram.org/bot{token}/sendMessage", {
+        "chat_id": chat_id, "text": msg, "disable_web_page_preview": "true"
+    })
+    if not result.get("ok"):
+        raise RuntimeError("Telegram hat die Nachricht nicht akzeptiert")
 
 def save(state):
     tmp = STATE_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(STATE_PATH)
 
+def event_key(dt, impact, e):
+    val = "\x1f".join([dt.isoformat(), impact, str(e["country"]), str(e["title"])])
+    return hashlib.sha256(val.encode()).hexdigest()
+
 def run():
-    token = os.environ.get("BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("CHAT_ID", "").strip()
+    now = datetime.now(BERLIN)
+    if now.hour < 17 or now.hour >= 23:
+        logging.info("Vorabinformation startet erst um 17 Uhr Berlin; jetzt %s.", now.strftime("%H:%M"))
+        return
+    token = os.getenv("BOT_TOKEN", "").strip()
+    chat_id = os.getenv("CHAT_ID", "").strip()
     if not token or not chat_id:
-        raise RuntimeError("GitHub-Secrets BOT_TOKEN und CHAT_ID fehlen.")
-    events = fetch_events()
-    week = week_id(events)
-    snapshot = {key_for(e): str(e["impact"]).strip().casefold() for e in events}
-    state = None
+        raise RuntimeError("BOT_TOKEN oder CHAT_ID fehlt")
+    tomorrow = now.date() + timedelta(days=1)
+    entries = load_calendar(tomorrow, now.date())
+    state = {}
     if STATE_PATH.exists():
         state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        if not isinstance(state, dict) or not isinstance(state.get("events"), dict):
-            raise ValueError("Gespeicherter Kalenderstand ungültig.")
-    if state is None or state.get("week") != week:
-        save({"week": week, "events": snapshot})
-        logging.info("Ausgangsbestand gespeichert: %d Einträge; keine Alarme.", len(events))
+    if not isinstance(state, dict):
+        raise ValueError("Gespeicherter Stand ist ungültig")
+    delivered = state.setdefault("announced_next_day", {})
+    if not isinstance(delivered, dict):
+        raise ValueError("Gespeicherte Ankündigungen sind ungültig")
+    day = tomorrow.isoformat()
+    done = set(delivered.get(day, []))
+    pending = []
+    for dt, impact, e in entries:
+        key = event_key(dt, impact, e)
+        if key not in done:
+            pending.append((key, f'{IMPACT[impact]} {dt:%H:%M}  {e["country"]} – {e["title"]}'))
+    if not pending:
+        logging.info("Keine neuen Vorabinformationen für %s (%d Termine im Kalender).", day, len(entries))
         return
-    seen = state["events"]
-    sent = 0
-    for e in events:
-        key = key_for(e)
-        impact = str(e["impact"]).strip().casefold()
-        if impact in ("low", "medium", "high") and seen.get(key) != impact:
-            send_alert(token, chat_id, e)
-            sent += 1
-            seen[key] = impact
-            save(state)
-        else:
-            seen[key] = impact
-    save(state)
-    logging.info("Geprüft: %d Ereignisse, %d neue Warnungen (Gelb/Orange/Rot).", len(events), sent)
+    header = f"📅 Forex Factory – Termine für morgen, {tomorrow:%d.%m.%Y}\nZeiten: Deutschland (Berlin)\n\n"
+    batch = []
+    size = len(header)
+    def send_batch(items):
+        if not items:
+            return
+        message = header + "\n".join(line for _, line in items) + "\n\nhttps://www.forexfactory.com/calendar"
+        send_message(token, chat_id, message)
+        done.update(key for key, _ in items)
+        delivered[day] = sorted(done)
+        # Aufbewahrungszeit begrenzen, damit der GitHub-Stand klein bleibt
+        for d in list(delivered):
+            if d < (now.date() - timedelta(days=14)).isoformat():
+                del delivered[d]
+        save(state)
+    for item in pending:
+        length = len(item[1]) + 1
+        if batch and size + length + 55 > MAX_MESSAGE:
+            send_batch(batch)
+            batch = []
+            size = len(header)
+        batch.append(item)
+        size += length
+    send_batch(batch)
+    logging.info("%d Termine für morgen angekündigt.", len(pending))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         run()
     except Exception as exc:
-        logging.error("Prüfung fehlgeschlagen: %s", type(exc).__name__)
+        logging.error("Vorabinformation fehlgeschlagen: %s", type(exc).__name__)
         sys.exit(1)
