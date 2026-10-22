@@ -95,7 +95,7 @@ def run():
         if impact in ("low", "medium", "high") and seen.get(key) != impact:
             send_alert(token, chat_id, e)
             sent += 1
-            seen[key] = "high"
+            seen[key] = impact
             save(state)
         else:
             seen[key] = impact
