@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Einmalige Prüfung neuer roter Forex-Factory-Kalenderereignisse."""
+"""Einmalige Prüfung neuer Forex-Factory-Ereignisse (Low/Medium/High)."""
 import hashlib
 import json
 import logging
@@ -48,8 +48,10 @@ def key_for(event):
 
 def send_alert(token, chat_id, event):
     date = parse_date(event["date"]).astimezone(BERLIN).strftime("%d.%m.%Y, %H:%M Uhr (Berlin)")
+    impact = str(event["impact"]).strip().casefold()
+    icon, label = {"low": ("🟡", "LOW"), "medium": ("🟠", "MEDIUM"), "high": ("🔴", "HIGH")}[impact]
     message = (
-        "🔴 NEUES HIGH-IMPACT-EREIGNIS\n\n"
+        f"{icon} NEUES {label}-IMPACT-EREIGNIS\n\n"
         f"Währung: {event['country']}\n"
         f"Ereignis: {event['title']}\n"
         f"Termin: {date}\n\n"
@@ -90,7 +92,7 @@ def run():
     for e in events:
         key = key_for(e)
         impact = str(e["impact"]).strip().casefold()
-        if impact == "high" and seen.get(key) != "high":
+        if impact in ("low", "medium", "high") and seen.get(key) != impact:
             send_alert(token, chat_id, e)
             sent += 1
             seen[key] = "high"
@@ -98,7 +100,7 @@ def run():
         else:
             seen[key] = impact
     save(state)
-    logging.info("Geprüft: %d Ereignisse, %d neue rote Warnungen.", len(events), sent)
+    logging.info("Geprüft: %d Ereignisse, %d neue Warnungen (Gelb/Orange/Rot).", len(events), sent)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
