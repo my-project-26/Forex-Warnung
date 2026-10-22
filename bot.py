@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 STATE_PATH = ROOT / "seen_events.json"
 BASE = "https://nfs.faireconomy.media/"
 BERLIN = ZoneInfo("Europe/Berlin")
-IMPACT = {"low": "🟡", "medium": "🟠", "high": "🔴"}
+IMPACT = {"high": "🔴"}
 MAX_MESSAGE = 3500
 
 def get_json(url, data=None):
@@ -64,7 +64,7 @@ def event_key(dt, impact, e):
 
 def run():
     now = datetime.now(BERLIN)
-    if now.hour < 17 or now.hour >= 23:
+    if now.hour != 17:
         logging.info("Vorabinformation startet erst um 17 Uhr Berlin; jetzt %s.", now.strftime("%H:%M"))
         return
     token = os.getenv("BOT_TOKEN", "").strip()
