@@ -1,9 +1,9 @@
 name: Forex-Warnung
 on:
   schedule:
-    # UTC-Zeiten decken Sommer- und Winterzeit ab; bot.py filtert auf Berlin.
-    - cron: '30 14-16 * * *'
-    - cron: '0 15-17 * * *'
+    # Fruehere, haeufigere Versuche zur Abfederung verspaeteter GitHub-Starts.
+    # UTC; bot.py sendet erst ab 16:30 Uhr Europe/Berlin.
+    - cron: '7,22,37,52 12-18 * * *'
   workflow_dispatch:
 permissions:
   contents: write
