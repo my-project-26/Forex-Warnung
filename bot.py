@@ -64,10 +64,10 @@ def event_key(dt, impact, e):
 
 def run():
     now = datetime.now(BERLIN)
-    # GitHub cron läuft in UTC; nur zwischen 16:30 und 18:29 Uhr Berlin senden.
-    # Spätere Läufe dürfen nur bisher nicht angekündigte rote Termine senden.
-    if not ((now.hour == 16 and now.minute >= 30) or now.hour == 17 or (now.hour == 18 and now.minute < 30)):
-        logging.info("Außerhalb des Prüffensters 16:30–18:29 Berlin (%s).", now.strftime("%H:%M"))
+    # GitHub Actions kann geplante Läufe um Stunden verzögern.
+    # Nach 16:30 Uhr Berlin bis Mitternacht senden; nur neue Termine erneut melden.
+    if now.hour < 16 or (now.hour == 16 and now.minute < 30):
+        logging.info("Noch vor 16:30 Berlin (%s).", now.strftime("%H:%M"))
         return
     token = os.getenv("BOT_TOKEN", "").strip()
     chat_id = os.getenv("CHAT_ID", "").strip()
