@@ -31,9 +31,9 @@ def parse_date(value):
     return dt.astimezone(BERLIN)
 
 def load_calendar(tomorrow, today):
-    # Am Sonntag liegen Montags-Termine in der nächsten Kalenderwoche.
-    feed = "ff_calendar_nextweek.json" if today.weekday() == 6 else "ff_calendar_thisweek.json"
-    events = get_json(BASE + feed)
+    # Der Export bietet nur thisweek; nextweek liefert HTTP 404.
+    # Auch sonntags den aktuellen Export verwenden und Folgetag filtern.
+    events = get_json(BASE + "ff_calendar_thisweek.json")
     if not isinstance(events, list) or not events:
         raise ValueError("Kalenderdaten fehlen oder haben ein ungültiges Format")
     result = []
