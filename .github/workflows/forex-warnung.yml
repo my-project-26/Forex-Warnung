@@ -1,39 +1,13 @@
-name: Forex-Warnung
+# Deaktiviert: Forex-Warnungen laufen jetzt ueber Make.com.
+# Keine zeitgesteuerten Ausfuehrungen und auch bei manuellem Start kein Versand.
+name: Forex-Warnung (pausiert)
 on:
-  schedule:
-    # Fruehere, haeufigere Versuche zur Abfederung verspaeteter GitHub-Starts.
-    # UTC; bot.py sendet erst ab 16:30 Uhr Europe/Berlin.
-    - cron: '7,22,37,52 12-18 * * *'
   workflow_dispatch:
 permissions:
-  contents: write
-concurrency:
-  group: forex-warnung
-  cancel-in-progress: false
+  contents: read
 jobs:
-  check-calendar:
+  paused:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Kalender prüfen und Telegram benachrichtigen
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python bot.py
-      - name: Kalenderstand sichern
-        run: |
-          if git status --porcelain -- seen_events.json | grep -q .; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add seen_events.json
-            git commit -m 'Kalenderstand aktualisieren [skip ci]'
-            git push
-          else
-            echo 'Keine Änderungen.'
-          fi
+      - run: echo "Forex-Warnung ueber GitHub deaktiviert; Make.com ist aktiv."
